@@ -9,7 +9,7 @@ homepage = "https://docs.rs/magic-orb"
 repository = "https://github.com/LevLobanov/magic-orb"
 authors = ["Lev lobanov <lev.lobanov.g@yandex.ru>"]
 readme = "README.md"
-keywords = ["spsc", "mpmc", "mpsc", "spmc", "ring-buffer", "rb"]
+keywords = ["spsc", "mpmc", "mpsc", "ring-buffer", "rb"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
