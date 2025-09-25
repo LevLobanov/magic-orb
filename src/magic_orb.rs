@@ -73,7 +73,7 @@ impl<T: Clone + Send> MagicOrb<T> {
         self.take_lock();
         {
             // SAFETY: Lock prevents aliasing &mut T
-            // Guarantees requred: should be between self.take_lock() and self.return_lock()
+            // Guarantees required: should be between self.take_lock() and self.return_lock()
             let buf = unsafe { self.buf.get().as_mut().unwrap() };
             let write = self.write.load(Ordering::Relaxed);
 
@@ -96,7 +96,7 @@ impl<T: Clone + Send> MagicOrb<T> {
         self.take_lock();
         {
             // SAFETY: Lock prevents aliasing &mut T.
-            // Guarantees requred: should be between self.take_lock() and self.return_lock()
+            // Guarantees required: should be between self.take_lock() and self.return_lock()
             let buf = unsafe { self.buf.get().as_mut().unwrap() };
             let write = self.write.load(Ordering::Relaxed);
             ret.extend_from_slice(&buf[write..]);
@@ -215,8 +215,8 @@ mod tests {
             reads += 1;
         }
 
-        eprintln!("\n--- Результаты теста ---");
-        eprintln!("Количество чтений за 1 секунду (размер буфера {}): {}", buffer_size, reads);
+        eprintln!("\n--- Test results ---");
+        eprintln!("Reads within 1 sec (buffer size: {}): {}", buffer_size, reads);
     }
     
     #[test]
@@ -233,8 +233,8 @@ mod tests {
             writes += 1;
         }
 
-        eprintln!("\n--- Результаты теста ---");
-        eprintln!("Количество записей (срез размером {}) за 1 секунду: {}", slice_size, writes);
+        eprintln!("\n--- Test results ---");
+        eprintln!("Slices writes of 16 bytes within 1 sec (buffer size: {}): {}", slice_size, writes);
     }
 
     #[test]
@@ -269,9 +269,7 @@ mod tests {
         let reads = read_handle.join().unwrap();
         let writes = write_handle.join().unwrap();
         
-        eprintln!("\n--- Результаты теста ---");
-        eprintln!("Чередование операций за 1 секунду:");
-        eprintln!("Количество чтений: {}", reads);
-        eprintln!("Количество записей: {}", writes);
+        eprintln!("\n--- Test results ---");
+        eprintln!("Reads - writes within 1 sec (buffer size: {}): Reads: {} Writes: {}", buffer_size, reads, writes);
     }
 }
