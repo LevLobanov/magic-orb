@@ -1,0 +1,19 @@
+[package]
+name = "magic-orb"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Implementation of thread-safe, overwrite, heap-stored, fix-sized, locking Ring buffer"
+documentation = "https://docs.rs/magic-orb"
+homepage = "https://docs.rs/magic-orb"
+repository = "https://github.com/LevLobanov/magic-orb"
+authors = ["Lev lobanov <lev.lobanov.g@yandex.ru>"]
+readme = "README.md"
+keywords = ["spsc", "mpmc", "mpsc", "spmc", "ring-buffer", "rb"]
+categories = ["concurrency", "data-structures"]
+
+[dependencies]
+
+[features]
+default = ["not_nightly"]
+not_nightly = []
