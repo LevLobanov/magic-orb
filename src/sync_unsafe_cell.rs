@@ -26,7 +26,9 @@ impl<T> SyncUnsafeCell<T> {
     /// Constructs a new instance of `SyncUnsafeCell` which will wrap the specified value.
     #[inline]
     pub const fn new(value: T) -> Self {
-        Self { value: UnsafeCell::new(value) }
+        Self {
+            value: UnsafeCell::new(value),
+        }
     }
 }
 

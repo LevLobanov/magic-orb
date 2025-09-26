@@ -3,12 +3,9 @@ use crate::sync_unsafe_cell::SyncUnsafeCell;
 #[cfg(not(feature = "not_nightly"))]
 use std::cell::SyncUnsafeCell;
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
-};
+use std::{cmp::min, fmt::Debug, sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering}, Arc
+}};
 
 #[derive(Debug, Clone)]
 pub struct MagicOrb<T>
@@ -18,7 +15,8 @@ where
     buf: Arc<SyncUnsafeCell<Vec<T>>>,
     write: Arc<AtomicUsize>,
     lock: Arc<AtomicBool>,
-    len: usize,
+    len: Arc<AtomicUsize>,
+    capacity: Arc<AtomicUsize>,
 }
 
 impl<T: Default + Clone + Send> MagicOrb<T> {
@@ -30,7 +28,8 @@ impl<T: Default + Clone + Send> MagicOrb<T> {
             buf: Arc::new(SyncUnsafeCell::new(vec![T::default(); size])),
             write: Arc::new(AtomicUsize::new(0)),
             lock: Arc::new(AtomicBool::new(false)),
-            len: size,
+            len: Arc::new(AtomicUsize::new(size)),
+            capacity: Arc::new(AtomicUsize::new(size)),
         }
     }
 }
@@ -41,7 +40,8 @@ impl<T: Clone + Send> From<Vec<T>> for MagicOrb<T> {
             panic!("Can't crate MagicOrb with buffer size 0");
         }
         MagicOrb {
-            len: value.len(),
+            capacity: Arc::new(AtomicUsize::new(value.len())),
+            len: Arc::new(AtomicUsize::new(value.len())),
             buf: Arc::new(SyncUnsafeCell::new(value)),
             write: Arc::new(AtomicUsize::new(0)),
             lock: Arc::new(AtomicBool::new(false)),
@@ -49,7 +49,7 @@ impl<T: Clone + Send> From<Vec<T>> for MagicOrb<T> {
     }
 }
 
-impl<T: Clone + Send> MagicOrb<T> {
+impl<T: Clone + Send + Debug> MagicOrb<T> {
     pub fn new(size: usize, default_val: T) -> Self {
         if size == 0 {
             panic!("Can't crate MagicOrb with buffer size 0");
@@ -58,12 +58,13 @@ impl<T: Clone + Send> MagicOrb<T> {
             buf: Arc::new(SyncUnsafeCell::new(vec![default_val; size])),
             write: Arc::new(AtomicUsize::new(0)),
             lock: Arc::new(AtomicBool::new(false)),
-            len: size,
+            len: Arc::new(AtomicUsize::new(size)),
+            capacity: Arc::new(AtomicUsize::new(size)),
         }
     }
 
     pub fn push_slice_overwrite(&self, data: &[T]) {
-        let occupied = self.len;
+        let occupied = self.capacity.load(Ordering::Acquire);
         let data = if data.len() > occupied {
             &data[data.len() - occupied..]
         } else {
@@ -85,32 +86,97 @@ impl<T: Clone + Send> MagicOrb<T> {
                 let first_len = occupied - write;
                 buf[write..].clone_from_slice(&data[..first_len]);
                 buf[..data.len() - first_len].clone_from_slice(&data[first_len..]);
+                self.write
+                    .store(data.len() - first_len, Ordering::Relaxed);
             }
+
+            let capacity = self.capacity();
+
+            _ = self
+                .len
+                .fetch_update(Ordering::Release, Ordering::Acquire, |cur_val| {
+                    if cur_val < capacity {
+                        Some(min(cur_val + data.len(), capacity))
+                    } else {
+                        None
+                    }
+                });
         }
         self.return_lock();
     }
 
     pub fn get_contiguous(&self) -> Vec<T> {
-        let mut ret = Vec::with_capacity(self.len);
+        let capacity = self.capacity();
+        let mut ret = Vec::with_capacity(capacity);
+
+        if self.is_empty() {
+            return ret;
+        }
 
         self.take_lock();
-        {
+        let vacant_amount = {
             // SAFETY: Lock prevents aliasing &mut T.
             // Guarantees required: should be between self.take_lock() and self.return_lock()
             let buf = unsafe { self.buf.get().as_mut().unwrap() };
             let write = self.write.load(Ordering::Relaxed);
+            let vacant_amount = capacity - self.len();
             ret.extend_from_slice(&buf[write..]);
             ret.extend_from_slice(&buf[..write]);
-        }
+            vacant_amount
+        };
         self.return_lock();
 
+        if vacant_amount > 0 {
+            ret = ret.split_off(vacant_amount);
+        }
+
         ret
+    }
+
+    pub fn pop_front(&self) {
+        self.take_lock();
+        {
+            if self
+                .len
+                .fetch_update(Ordering::SeqCst, Ordering::Acquire, |cur_val| {
+                    if cur_val == 0 {
+                        None
+                    } else {
+                        Some(cur_val - 1)
+                    }
+                })
+                .is_ok()
+            {
+                let max_len = self.capacity();
+                _ = self
+                    .write
+                    .fetch_update(Ordering::Release, Ordering::Relaxed, |idx| {
+                        Some((idx + max_len - 1) % max_len)
+                    });
+            }
+        }
+        self.return_lock();
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity.load(Ordering::Relaxed)
+    }
+
+    pub fn len(&self) -> usize {
+        self.len.load(Ordering::Relaxed)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        if self.len() == 0 {
+            return true;
+        }
+        false
     }
 
     fn take_lock(&self) {
         while self
             .lock
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Acquire)
+            .compare_exchange(false, true, Ordering::Release, Ordering::Acquire)
             .is_err()
         {
             std::hint::spin_loop();
@@ -125,7 +191,7 @@ impl<T: Clone + Send> MagicOrb<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{thread, time::{Duration, Instant}};
+    use std::thread;
 
     #[test]
     fn test_new_default() {
@@ -204,72 +270,70 @@ mod tests {
     }
 
     #[test]
-    fn bench_read_performance() {
-        let buffer_size = 4096;
-        let orb = Arc::new(MagicOrb::new(buffer_size, 0usize));
-        let mut reads = 0;
-        let start = Instant::now();
-
-        while start.elapsed() < Duration::from_secs(1) {
-            let _result = orb.get_contiguous();
-            reads += 1;
-        }
-
-        eprintln!("\n--- Test results ---");
-        eprintln!("Reads within 1 sec (buffer size: {}): {}", buffer_size, reads);
-    }
-    
-    #[test]
-    fn bench_write_performance() {
-        let buffer_size = 4096;
-        let slice_size = 16;
-        let orb = Arc::new(MagicOrb::new_default(buffer_size));
-        let slice: Vec<usize> = (0..slice_size).collect();
-        let mut writes = 0;
-        let start = Instant::now();
-
-        while start.elapsed() < Duration::from_secs(1) {
-            orb.push_slice_overwrite(&slice);
-            writes += 1;
-        }
-
-        eprintln!("\n--- Test results ---");
-        eprintln!("Slices writes of 16 bytes within 1 sec (buffer size: {}): {}", slice_size, writes);
+    fn test_pop_front_from_full_orb() {
+        let orb = MagicOrb::from(vec![1, 2, 3, 4, 5]);
+        assert_eq!(orb.len(), 5);
+        orb.pop_front();
+        assert_eq!(orb.len(), 4);
+        let contents = orb.get_contiguous();
+        assert_eq!(contents, vec![1, 2, 3, 4]);
     }
 
     #[test]
-    fn bench_alternating_performance() {
-        let buffer_size = 4096;
-        let slice_size = 16;
-        let orb = Arc::new(MagicOrb::new_default(buffer_size));
-        let slice: Vec<usize> = (0..slice_size).collect();
+    fn test_pop_front_until_empty() {
+        let orb = MagicOrb::from(vec![1, 2, 3]);
+        assert_eq!(orb.len(), 3);
+        orb.pop_front();
+        assert_eq!(orb.len(), 2);
+        let contents = orb.get_contiguous();
+        assert_eq!(contents, vec![1, 2]);
 
-        let orb_clone_read = Arc::clone(&orb);
-        let read_handle = thread::spawn(move || {
-            let mut reads = 0;
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(1) {
-                let _result = orb_clone_read.get_contiguous();
-                reads += 1;
-            }
-            reads
-        });
+        orb.pop_front();
+        assert_eq!(orb.len(), 1);
+        let contents = orb.get_contiguous();
+        assert_eq!(contents, vec![1]);
 
-        let orb_clone_write = Arc::clone(&orb);
-        let write_handle = thread::spawn(move || {
-            let mut writes = 0;
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(1) {
-                orb_clone_write.push_slice_overwrite(&slice);
-                writes += 1;
-            }
-            writes
-        });
+        orb.pop_front();
+        assert_eq!(orb.len(), 0);
+        assert!(orb.is_empty());
+        let contents = orb.get_contiguous();
+        assert!(contents.is_empty());
+    }
 
-        let reads = read_handle.join().unwrap();
-        let writes = write_handle.join().unwrap();
-        
-        eprintln!("\n--- Test results ---");
-        eprintln!("Reads - writes within 1 sec (buffer size: {}): Reads: {} Writes: {}", buffer_size, reads, writes);
+    #[test]
+    fn test_pop_front_from_empty_orb() {
+        let orb = MagicOrb::new(5, 0);
+        assert_eq!(orb.len(), 5);
+        for _ in 0..5 {
+            orb.pop_front();
+        }
+        assert_eq!(orb.len(), 0);
+
+        orb.pop_front();
+        assert_eq!(orb.len(), 0);
+        assert!(orb.is_empty());
+    }
+
+    #[test]
+    fn test_pop_front_after_push_and_overwrite() {
+        let orb = MagicOrb::new_default(4);
+        orb.push_slice_overwrite(&[1, 2, 3, 4, 5, 6]);
+        assert_eq!(orb.len(), 4);
+        let contents = orb.get_contiguous();
+        assert_eq!(contents, vec![3, 4, 5, 6]);
+
+        orb.pop_front();
+        orb.pop_front();
+        orb.push_slice_overwrite(&[7]);
+        assert_eq!(orb.len(), 3);
+        let contents = orb.get_contiguous();
+        assert_eq!(contents, vec![3, 4, 7]);
+
+        orb.push_slice_overwrite(&[9, 10]);
+        assert_eq!(orb.get_contiguous(), vec![4, 7, 9, 10]);
+        orb.pop_front();
+        assert_eq!(orb.len(), 3);
+        let contents = orb.get_contiguous();
+        assert_eq!(contents, vec![4, 7, 9]);
     }
 }

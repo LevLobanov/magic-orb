@@ -17,3 +17,9 @@ categories = ["concurrency", "data-structures"]
 [features]
 default = ["not_nightly"]
 not_nightly = []
+
+[[bench]]
+name = "magic_orb_bench"
+
+[bench.dependencies]
+magic_orb = { path = "." }
