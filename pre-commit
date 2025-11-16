@@ -1,0 +1,18 @@
+#!/bin/sh
+
+echo "▶️ Running pre-commit hook..."
+
+echo "  Running cargo fmt..."
+cargo fmt
+
+echo "  Running cargo test..."
+if ! cargo test; then
+    echo "❌ cargo test failed. Commit aborted."
+    exit 1
+fi
+
+git add -u
+git diff --name-only | grep '\.rs$' | xargs git add
+
+echo "✅ Pre-commit checks passed."
+exit 0
