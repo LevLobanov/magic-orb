@@ -3,9 +3,14 @@ use crate::sync_unsafe_cell::SyncUnsafeCell;
 #[cfg(not(feature = "not_nightly"))]
 use std::cell::SyncUnsafeCell;
 
-use std::{cmp::min, fmt::Debug, sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering}, Arc
-}};
+use std::{
+    cmp::min,
+    fmt::Debug,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+};
 
 #[derive(Debug, Clone)]
 pub struct MagicOrb<T>
@@ -86,15 +91,14 @@ impl<T: Clone + Send + Debug> MagicOrb<T> {
                 let first_len = occupied - write;
                 buf[write..].clone_from_slice(&data[..first_len]);
                 buf[..data.len() - first_len].clone_from_slice(&data[first_len..]);
-                self.write
-                    .store(data.len() - first_len, Ordering::Relaxed);
+                self.write.store(data.len() - first_len, Ordering::Relaxed);
             }
 
             let capacity = self.capacity();
 
             _ = self
                 .len
-                .fetch_update(Ordering::Release, Ordering::Acquire, |cur_val| {
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur_val| {
                     if cur_val < capacity {
                         Some(min(cur_val + data.len(), capacity))
                     } else {
@@ -109,11 +113,12 @@ impl<T: Clone + Send + Debug> MagicOrb<T> {
         let capacity = self.capacity();
         let mut ret = Vec::with_capacity(capacity);
 
+        self.take_lock();
         if self.is_empty() {
+            self.return_lock();
             return ret;
         }
 
-        self.take_lock();
         let vacant_amount = {
             // SAFETY: Lock prevents aliasing &mut T.
             // Guarantees required: should be between self.take_lock() and self.return_lock()
@@ -138,7 +143,7 @@ impl<T: Clone + Send + Debug> MagicOrb<T> {
         {
             if self
                 .len
-                .fetch_update(Ordering::SeqCst, Ordering::Acquire, |cur_val| {
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur_val| {
                     if cur_val == 0 {
                         None
                     } else {
@@ -150,7 +155,7 @@ impl<T: Clone + Send + Debug> MagicOrb<T> {
                 let max_len = self.capacity();
                 _ = self
                     .write
-                    .fetch_update(Ordering::Release, Ordering::Relaxed, |idx| {
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |idx| {
                         Some((idx + max_len - 1) % max_len)
                     });
             }

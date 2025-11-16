@@ -4,7 +4,9 @@
 mod tests {
     use ::magic_orb::*;
     use std::{
-        sync::Arc, thread, time::{Duration, Instant}
+        sync::Arc,
+        thread,
+        time::{Duration, Instant},
     };
 
     #[test]
