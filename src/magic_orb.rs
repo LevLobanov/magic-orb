@@ -133,7 +133,7 @@ impl<T: Clone + Send + Debug> MagicOrb<T> {
         ret
     }
 
-    pub fn pop_front(&self) {
+    pub fn pop_back(&self) {
         self.take_lock();
         {
             if self
@@ -273,7 +273,7 @@ mod tests {
     fn test_pop_front_from_full_orb() {
         let orb = MagicOrb::from(vec![1, 2, 3, 4, 5]);
         assert_eq!(orb.len(), 5);
-        orb.pop_front();
+        orb.pop_back();
         assert_eq!(orb.len(), 4);
         let contents = orb.get_contiguous();
         assert_eq!(contents, vec![1, 2, 3, 4]);
@@ -283,17 +283,17 @@ mod tests {
     fn test_pop_front_until_empty() {
         let orb = MagicOrb::from(vec![1, 2, 3]);
         assert_eq!(orb.len(), 3);
-        orb.pop_front();
+        orb.pop_back();
         assert_eq!(orb.len(), 2);
         let contents = orb.get_contiguous();
         assert_eq!(contents, vec![1, 2]);
 
-        orb.pop_front();
+        orb.pop_back();
         assert_eq!(orb.len(), 1);
         let contents = orb.get_contiguous();
         assert_eq!(contents, vec![1]);
 
-        orb.pop_front();
+        orb.pop_back();
         assert_eq!(orb.len(), 0);
         assert!(orb.is_empty());
         let contents = orb.get_contiguous();
@@ -305,11 +305,11 @@ mod tests {
         let orb = MagicOrb::new(5, 0);
         assert_eq!(orb.len(), 5);
         for _ in 0..5 {
-            orb.pop_front();
+            orb.pop_back();
         }
         assert_eq!(orb.len(), 0);
 
-        orb.pop_front();
+        orb.pop_back();
         assert_eq!(orb.len(), 0);
         assert!(orb.is_empty());
     }
@@ -322,8 +322,8 @@ mod tests {
         let contents = orb.get_contiguous();
         assert_eq!(contents, vec![3, 4, 5, 6]);
 
-        orb.pop_front();
-        orb.pop_front();
+        orb.pop_back();
+        orb.pop_back();
         orb.push_slice_overwrite(&[7]);
         assert_eq!(orb.len(), 3);
         let contents = orb.get_contiguous();
@@ -331,7 +331,7 @@ mod tests {
 
         orb.push_slice_overwrite(&[9, 10]);
         assert_eq!(orb.get_contiguous(), vec![4, 7, 9, 10]);
-        orb.pop_front();
+        orb.pop_back();
         assert_eq!(orb.len(), 3);
         let contents = orb.get_contiguous();
         assert_eq!(contents, vec![4, 7, 9]);
